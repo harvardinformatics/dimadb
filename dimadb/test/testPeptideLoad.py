@@ -11,39 +11,126 @@ Created on  2017-03-31 14:50:26
 '''
 
 import unittest, os
+import subprocess
+from BioSQL import BioSeqDatabase
+from sqlalchemy.engine import create_engine
+from sqlalchemy import select,func
 from dimadb import loadPeptideDataFile, Store
 
-DIMADB_CONNECT = os.environ.get('DIMADB_CONNECT')
+DIMADB_TEST_DRIVER = os.environ.get('DIMADB_TEST_DRIVER', 'mysql+mysqldb')
+DIMADB_TEST_USER = os.environ.get('DIMADB_TEST_USER')
+DIMADB_TEST_PASSWORD = os.environ.get('DIMADB_TEST_PASSWORD')
+DIMADB_TEST_DATABASE = os.environ.get('DIMADB_TEST_DATABASE','dimadbtest')
+DIMADB_TEST_HOST = os.environ.get('DIMADB_TEST_HOST')
+
 SEQS_FILE = 'seqs.txt'
-PEPTIDE_DATA = '''Confidence  Annotated Sequence  Modifications   Modifications in Master Proteins    # Protein Groups    # Proteins  # PSMs  Master Protein Accessions   Positions in Master Proteins    # Missed Cleavages  Theo. MH+ [Da]  Abundance Ratio: (127N) / (126) Abundance Ratio: (127C) / (126) Abundance Ratio: (128N) / (126) Abundance Ratio: (128C) / (126) Abundance Ratio: (129C) / (129N)    Abundance Ratio: (130N) / (129N)    Abundance Ratio: (130C) / (129N)    Abundance Ratio: (131) / (129N) Abundances (Grouped): 126   Abundances (Grouped): 127N  Abundances (Grouped): 127C  Abundances (Grouped): 128N  Abundances (Grouped): 128C  Abundances (Grouped): 129N  Abundances (Grouped): 129C  Abundances (Grouped): 130N  Abundances (Grouped): 130C  Abundances (Grouped): 131   Contaminant Off by X    Position in Protein Confidence (by Search Engine): A9 PMI-Byonic    Confidence (by Search Engine): Sequest HT   Percolator q-Value (by Search Engine): Sequest HT   Percolator PEP (by Search Engine): Sequest HT   Percolator SVMScore (by Search Engine): Sequest HT
-High    [-].MAMSAASDGNHVAPPELMGQSPPHSPR.[A] 2xPhospho [S21; S25]; 2xOxidation [M3; M18]; 1xTMT6plex [N-Term]    F4JLS6 2xPhospho [S21; S25] 1   1   1   F4JLS6  F4JLS6 [1-27]   0   3193.35049  0.83    1.27    1.33    0.97    0.87    0.98    0.82    1.50    7.90E+03    6.58E+03    1.01E+04    1.05E+04    7.67E+03    6.98E+03    6.05E+03    6.86E+03    5.74E+03    1.05E+04    FALSE   0   0   n/a High    0.001511    0.01686 0.345
-High    [-].MAPQLLSSSNFK.[S]    1xAcetyl [N-Term]; 2xDeamidated [Q4; N10]; 1xPhospho [S7]; 1xTMT6plex [K/M] Q8GWU0 1xAcetyl [N-Term]; 1xPhospho [S7]    1   1   1   Q8GWU0  Q8GWU0 [1-12]   0   1904.94809  0.87    1.17    1.11    0.81    0.66    0.88    0.76    0.91    1.63E+04    1.42E+04    1.91E+04    1.82E+04    1.32E+04    1.36E+04    9.03E+03    1.19E+04    1.03E+04    1.24E+04    FALSE   0   0   n/a High    0.003709    0.05089 0.168
-High    [-].MASPRVVSEDRK.[S]    1xPhospho [S8]; 1xTMT6plex [K/M]    F4IE60 1xPhospho [S8]   1   2   2   F4IE60  F4IE60 [1-12]   2   1913.008    1.11    1.31    1.23    1.16    0.76    0.89    0.96    1.32    8.02E+03    8.93E+03    1.05E+04    9.82E+03    9.32E+03    7.52E+03    5.72E+03    6.71E+03    7.22E+03    9.96E+03    FALSE   0   0   n/a High    0.007352    0.1213  0.046
-High    [-].MDSIQQR.[R] 1xTMT6plex [N-Term]; 1xPhospho [S3(100)]    Q9LZU5 1xPhospho [S3(100)]  1   1   5   Q9LZU5  Q9LZU5 [1-7]    0   1186.54889  0.78    1.09    1.72    1.11    0.71    0.81    1.02    1.12    3.86E+04    3.01E+04    4.21E+04    6.62E+04    4.27E+04    2.94E+04    2.09E+04    2.39E+04    2.99E+04    3.29E+04    FALSE   0   1   High    High    0.006477    0.1051  0.065
-'''
-PEPTIDE_DATA_FILE = 'test.txt'
+PEPTIDE_DATA_FILE = os.path.join(os.path.dirname(__file__),'partialSpreadforTesting.txt')
+
+BIOSQL_NAMESPACE = 'test'
+
+for key in ['SEQDB_LOADER_USER', 'SEQDB_LOADER_PASSWORD', 'SEQDB_LOADER_HOST', 'SEQDB_LOADER_DATABASE']:
+    if not os.environ.get(key) or os.environ[key] == '':
+        raise Exception('Must set SEQDB_LOADER_{USER,PASSWORD,HOST,DATABASE}')
 
 
-class Test(unittest):
+def runcmd(cmd):
+    '''
+    Execute a command and return stdout, stderr, and the return code
+    '''
+    proc = subprocess.Popen(
+        cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    stdoutstr, stderrstr = proc.communicate()
+    return (proc.returncode, stdoutstr, stderrstr)
+
+
+def loadseqs():
+    '''
+    Load sequences
+    '''
+    server = BioSeqDatabase.open_database(
+        driver=os.environ.get('SEQDB_LOADER_DRIVER', 'MySQLdb'),
+        user=os.environ.get('SEQDB_LOADER_USER'),
+        passwd=os.environ.get('SEQDB_LOADER_PASSWORD'),
+        host=os.environ.get('SEQDB_LOADER_HOST'),
+        db=os.environ.get('SEQDB_LOADER_DATABASE'),
+    )
+    try:
+        del server[BIOSQL_NAMESPACE]
+    except Exception:
+        pass
+
+    server.new_database(BIOSQL_NAMESPACE)
+    server.commit()
+    cmd = 'seqdb-loader --namespace %s --parser uniprox-xml sample.xml' % BIOSQL_NAMESPACE
+    returncode, stdout, stderr = runcmd(cmd)
+    if returncode != 0:
+        raise Exception('seqdb-loader failed: %s' % stderr)
+
+
+def removeseqs():
+    '''
+    Remove sequences
+    '''
+
+    server = BioSeqDatabase.open_database(
+        driver=os.environ.get('SEQDB_LOADER_DRIVER', 'MySQLdb'),
+        user=os.environ.get('SEQDB_LOADER_USER'),
+        passwd=os.environ.get('SEQDB_LOADER_PASSWORD'),
+        host=os.environ.get('SEQDB_LOADER_HOST'),
+        db=os.environ.get('SEQDB_LOADER_DATABASE'),
+    )
+    try:
+        del server[BIOSQL_NAMESPACE]
+    except Exception:
+        pass
+
+
+def initdb():
+    engine = create_engine(
+        '%s://%s:%s@%s' % (DIMADB_TEST_DRIVER, DIMADB_TEST_USER, DIMADB_TEST_PASSWORD, DIMADB_TEST_HOST))
+    connection = engine.connect()
+    try:
+        connection.execute('drop database %s' % DIMADB_TEST_DATABASE)
+    except Exception:
+        pass
+
+    connection.execute('create database %s' % DIMADB_TEST_DATABASE)
+    engine.dispose()
+
+
+def destroydb():
+    engine = create_engine(
+        '%s://%s:%s@%s' % (DIMADB_TEST_DRIVER, DIMADB_TEST_USER, DIMADB_TEST_PASSWORD, DIMADB_TEST_HOST))
+    connection = engine.connect()
+    try:
+        connection.execute('drop database %s' % DIMADB_TEST_DATABASE)
+    except Exception:
+        pass
+    engine.dispose()
+
+
+class Test(unittest.TestCase):
 
     def setUp(self):
         try:
-            os.unlink(PEPTIDE_DATA_FILE)
+            destroydb()
         except Exception:
             pass
-
-        with open(PEPTIDE_DATA_FILE,'w') as f:
-            f.write(PEPTIDE_DATA)
+        initdb()
+        self.store = Store('%s://%s:%s@%s/%s' % (DIMADB_TEST_DRIVER, DIMADB_TEST_USER, DIMADB_TEST_PASSWORD, DIMADB_TEST_HOST, DIMADB_TEST_DATABASE))
+        self.store.create()
 
     def tearDown(self):
-        try:
-            os.unlink(PEPTIDE_DATA_FILE)
-        except Exception:
-            pass
+
+        del self.store
+        destroydb()
 
     def testPeptideLoad(self):
         '''
         Test loadPeptideDataFile function
         '''
-        store = Store(DIMADB_CONNECT)
-        loadPeptideDataFile(store, PEPTIDE_DATA_FILE)
+        loadPeptideDataFile(self.store, PEPTIDE_DATA_FILE)
+        s = select([func.count(self.store.tables['peptide'].c.id)])
+        rs = s.execute()
+        peptidecount = rs.first()[0]
+        self.assertTrue(38 == peptidecount,'Incorrect peptide count %d' % peptidecount)

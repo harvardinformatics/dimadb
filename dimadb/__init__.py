@@ -12,3 +12,4 @@ Created on  2017-03-31 11:57:28
 
 
 from dimadb import *
+from store import *
