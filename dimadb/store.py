@@ -9,6 +9,8 @@ Created on  2017-03-31 12:26:37
 @copyright: 2016 The Presidents and Fellows of Harvard College. All rights reserved.
 @license: GPL v2.0
 '''
+import re
+
 from sqlalchemy.engine import create_engine
 from sqlalchemy import MetaData, Column, Table, types, ForeignKey
 from sqlalchemy.orm import sessionmaker
@@ -40,15 +42,6 @@ class Store(object):
         self.metadata = MetaData()
         
         self.tables = {}
-        self.tables['seq'] = Table(
-            'seq',
-            self.metadata,
-            Column('id',                            types.Integer,      primary_key=True, autoincrement='auto'),
-            Column('accession',                     types.String(50),   nullable=False),
-            Column('version',                       types.Integer),
-            Column('authority',                     types.String(20),   nullable=False),
-            Column('organism',                      types.String(100),  nullable=False),
-        )
         self.tables['peptide'] = Table(
             'peptide', 
             self.metadata, 
@@ -74,7 +67,7 @@ class Store(object):
             'peptide_modification',
             self.metadata,
             Column('id',                            types.Integer, primary_key=True, autoincrement='auto'),
-            Column('peptide_id',                   types.Integer, ForeignKey('peptide.id'),nullable=False),
+            Column('peptide_id',                    types.Integer, ForeignKey('peptide.id'),nullable=False),
             Column('mod_type',                      types.String(50), nullable=False),
             Column('loc_base',                      types.String(1)),
             Column('loc_pos',                       types.Integer),
@@ -88,7 +81,9 @@ class Store(object):
             Column('confidence',                    types.String(10)),
             Column('algorithm',                     types.String(100)),
             Column('peptide_id',                    types.Integer, ForeignKey('peptide.id'), nullable=False),
-            Column('seq_id',                        types.Integer, nullable=True),
+            Column('seq_id',                        types.String(100)),
+            Column('start',                         types.Integer),
+            Column('end',                           types.Integer),
         )
 
         self.tables['peptide_seq_match_data'] = Table(
@@ -152,7 +147,7 @@ class Store(object):
         pdata = dict((k,v) for k,v in peptidedata.iteritems() if v != '')
 
         i = self.tables['peptide'].insert()
-        i.execute(
+        rs = i.execute(
             confidence=pdata.get('Confidence'),
             annotated_sequence=pdata.get('Annotated Sequence'),
             modifications=pdata.get('Modifications'),
@@ -168,21 +163,104 @@ class Store(object):
             off_by_x=pdata.get('Off by X'),
             position_in_protein=pdata.get('Position in Protein'),
         )
+        self.session.commit()
+        return rs.lastrowid
 
-    def storePeptideAbundances(self,peptide,peptidedata):
+    def storePeptideAbundances(self,peptide_id,peptidedata):
         '''
         Takes the dictionary of peptide data and makes an abundance record from it
         '''
         pass
 
-    def storePeptideSeqMatches(self,peptide,peptidedata):
+    def storePeptideSeqMatches(self,peptide_id,peptidedata):
         '''
         Take the dictionary of peptide data and makes seq match records
         '''
-        pass
+        pdata = dict((k,v) for k,v in peptidedata.iteritems() if v != '')
+        masterstr = pdata.get('Positions in Master Proteins')
+        confidence = pdata.get('Confidence')
 
-    def storePeptideModifications(self,peptide,peptidedata):
+        # Capture additional data for peptide_seq_match_data
+        matchdata = []
+        for k,v in pdata.iteritems():
+            if '(by Search Engine)' in k:
+                d = {
+                    'name' : k,
+                    'strval' : v,
+                }
+                try:
+                    fval = float(v)
+                    d['fval'] = fval
+                except ValueError:
+                    pass
+                matchdata.append(d)
+
+        posre = re.compile(r'([^ ]+) \[(\d+)-(\d+)\]')
+        if masterstr is not None and masterstr.strip() != '':
+            mastermatches = re.split(r'\s*;\s*',masterstr)
+            for mastermatch in mastermatches:
+                m = posre.match(mastermatch)
+                if m is None:
+                    raise Exception('Master protein string does not look right: %s' % mastermatch)
+                acc = m.group(1)
+                start = int(m.group(2))
+                end = int(m.group(3))
+                i = self.tables['peptide_seq_match'].insert()
+                rs = i.execute(
+                    peptide_id=peptide_id,
+                    seq_id=acc,
+                    start=start,
+                    end=end,
+                    confidence=confidence,
+                )
+                peptide_seq_match_id = rs.lastrowid
+                self.session.commit()
+
+                i = self.tables['peptide_seq_match_data'].insert()
+                for d in matchdata:
+                    d['peptide_seq_match_id'] = peptide_seq_match_id
+                    i.execute(**d)
+
+                self.session.commit()
+
+    def storePeptideModifications(self,peptide_id,peptidedata):
         '''
         Take the dictionary of peptide data and make peptide modification records
         '''
-        pass
+        # Clean out the empties so that None can be null
+        pdata = dict((k,v) for k,v in peptidedata.iteritems() if v != '')
+
+        modifications = re.split('r\s*;\s*',pdata.get('Modifications',''))
+
+        # Modification string matcher, e.g. 2xPhospho [S21; S25] or TMT6plex [K]
+        modre = re.compile(r'\d*x*([^\s]+) \[([^\]]+)\]')
+
+        # Location string matcher, e.g. S21
+        modlocre = re.compile(r'([A-Z])(\d+)')
+
+        for modstr in modifications:
+            m = modre.match(modstr)
+            if m is None:
+                raise Exception('Modification string makes no sense: %s' % modstr)
+
+            mod_type = m.group(1).lower()
+            mod_locstr = m.group(2)
+            mod_locs = re.split(r'\s*;\s*',mod_locstr)
+
+            # Iterate over what may be more than one location
+            for mod_loc in mod_locs:
+                loc_base = None
+                loc_pos = None
+                m = modlocre.match(mod_loc)
+                if m is not None:
+                    loc_base = m.group(1)
+                    loc_pos = m.group(2)
+                i = self.tables['peptide_modification'].insert()
+                i.execute(
+                    peptide_id=peptide_id,
+                    mod_type=mod_type,
+                    loc_base=loc_base,
+                    loc_pos=loc_pos,
+                    loc_str=mod_loc,
+                )
+        self.session.commit()

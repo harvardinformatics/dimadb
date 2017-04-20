@@ -30,8 +30,9 @@ def loadPeptideDataFile(store, filename, dataset=None):
 
     headers = []
     with open(filename,'r') as f:
+        peptidedata = {}
         for line in f:
-            line = line.strip('')
+            line = line.strip()
             if line == '':
                 continue
             if len(headers) == 0:
@@ -41,7 +42,7 @@ def loadPeptideDataFile(store, filename, dataset=None):
             peptidedata = dict(zip(headers,line.split('\t')))
             if 'dataset' not in peptidedata:
                 peptidedata['dataset'] = dataset
-                
+
             store.savePeptideData(peptidedata)
 
 
