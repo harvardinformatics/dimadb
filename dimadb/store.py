@@ -95,6 +95,14 @@ class Store(object):
             Column('strval',                        types.String(100), nullable=False),
             Column('fval',                          types.Float),
         )
+        self.tables['peptide_abundance'] = Table(
+            'peptide_abundance',
+            self.metadata,
+            Column('id',                            types.Integer, primary_key=True, autoincrement='auto'),
+            Column('peptide_id',                    types.Integer, ForeignKey('peptide.id'), nullable=False),
+            Column('name',                          types.String(10), nullable=False),
+            Column('val',                           types.Integer, nullable=False),            
+        )
 
         self.metadata.bind = self.engine
         self.connection = self.engine.connect()
@@ -119,25 +127,11 @@ class Store(object):
         Iterates through all of the functions in the PEPTIDE_DATA_METHODS list.
         '''
 
-        self.storeMasterProteins(peptidedata)
-        peptide = self.storePeptide(peptidedata)
+        peptide_id = self.storePeptide(peptidedata)
 
         for methodname in PEPTIDE_DATA_METHODS:
             f = getattr(self,methodname)
-            f(peptide, peptidedata)
-
-    def storeMasterProteins(self,peptidedata):
-        '''
-        Extracts master protein references from the peptide data record. 
-        If the protein is not already in the seqs table, fetches from Uniprot and adds it via storeSeqs
-        '''
-        pass
-
-    def storeSeqs(self,**kwargs):
-        '''
-        Saves a seq record
-        '''
-        pass
+            f(peptide_id, peptidedata)
 
     def storePeptide(self,peptidedata):
         '''
@@ -170,7 +164,20 @@ class Store(object):
         '''
         Takes the dictionary of peptide data and makes an abundance record from it
         '''
-        pass
+        pdata = dict((k,v) for k,v in peptidedata.iteritems() if v != '')
+        headerre = re.compile(r'Abundances \(Grouped\): ([^ ]+)')
+        for k,v in pdata.iteritems():
+            m = headerre.match(k)
+            if m:
+                name = m.group(1)
+                val = int(v)
+                i = self.tables['peptide_abundance'].insert()
+                i.execute(
+                    peptide_id=peptide_id,
+                    name=name,
+                    val=val,
+                )
+        self.session.commit()
 
     def storePeptideSeqMatches(self,peptide_id,peptidedata):
         '''
