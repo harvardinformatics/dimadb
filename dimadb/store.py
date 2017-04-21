@@ -29,10 +29,13 @@ class Store(object):
     Class that manages interactions with the database
     '''
 
-    def __init__(self,connectstring):
+    def __init__(self,connectstring=None):
         '''
         Create the engine and connection.  Define the jobreport table
         '''
+
+        if connectstring is None:
+            connectstring = '%s//%s:%s@%s'
 
         # configure Session class with desired options
         self.engine = create_engine(connectstring)
@@ -47,8 +50,8 @@ class Store(object):
             self.metadata, 
             Column('id',                            types.Integer, primary_key=True, autoincrement='auto'),
             Column('confidence',                    types.String(10)),
-            Column('annotated_sequence',            types.String(100), nullable=False),
-            Column('modifications',                 types.String(1000), nullable=False),
+            Column('annotated_sequence',            types.String(100)),
+            Column('modifications',                 types.String(1000)),
             Column('modifications_in_master_proteins',  types.String(1000)),
             Column('no_protein_groups',             types.Integer),
             Column('no_proteins',                   types.Integer),

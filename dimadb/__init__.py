@@ -13,3 +13,5 @@ Created on  2017-03-31 11:57:28
 
 from dimadb import *
 from store import *
+
+__version__ = '0.1.0'

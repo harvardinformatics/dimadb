@@ -120,10 +120,9 @@ class Test(unittest.TestCase):
         self.store = Store('%s://%s:%s@%s/%s' % (DIMADB_TEST_DRIVER, DIMADB_TEST_USER, DIMADB_TEST_PASSWORD, DIMADB_TEST_HOST, DIMADB_TEST_DATABASE))
         self.store.create()
 
-#    def tearDown(self):
-#
-#        del self.store
-#        destroydb()
+    def tearDown(self):
+        del self.store
+        destroydb()
 
     def testPeptideLoad(self):
         '''
